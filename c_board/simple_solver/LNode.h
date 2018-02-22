@@ -46,10 +46,22 @@ no_root:
 static inline
 void LNode_destroy(struct LNode * root)
 {
-	    while (root) {
+        while (root) {
                 struct LNode * next = root->next;
                 free(root);
-				root = next;
+                root = next;
+        }
+}
+static inline
+void LNode_destroy_and_free_data(struct LNode * root)
+{
+        while (root) {
+                struct LNode * next = root->next;
+                if (root->data) {
+                        free(root->data);
+                }
+                free(root);
+                root = next;
         }
 }
 static inline
