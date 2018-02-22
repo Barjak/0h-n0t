@@ -8,12 +8,10 @@ set(PROOT ${CMAKE_CURRENT_LIST_DIR})
 project(Board C)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-add_library(simple_solver STATIC c_board/simple_solver/Problem.c)
 
-add_library(Board SHARED c_board/Board.c)
+add_library(Board SHARED c_board/Board.c c_board/simple_solver/Problem.c)
 set_property(TARGET Board PROPERTY WINDOWS_EXPORT_ALL_SYMBOLS 1)
 set_property(TARGET Board PROPERTY LIBRARY_OUTPUT_DIRECTORY ${PROOT})
-target_link_libraries(Board simple_solver)
 
 ## Package
 ####################

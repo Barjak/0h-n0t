@@ -1,6 +1,6 @@
 # 0h n0t
 
-This is an incomplete clone of [Martin Kool's](https://github.com/mrtnkl) game [0h n0](http://0hn0.com/).
+This is a clone of [Martin Kool's](https://github.com/mrtnkl) game [0h n0](http://0hn0.com/).
 
 A couple years ago, I wanted to play the game on larger boards, but the original board generation algorithm, while perfectly fine for small boards, scaled poorly. I tried reimplementing the original algorithm in C, but it was still slow, so I scrapped the project.
 
