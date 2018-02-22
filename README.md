@@ -18,7 +18,7 @@ Open the `0hn0t-win64` directory and run `0hn0t.exe`.
 
 `sudo apt-install love`
 
-`git clone https://github.com/Barjak/0h-n0t.git && cd 0hn0t`
+`git clone https://github.com/Barjak/0h-n0t.git && cd 0h-n0t`
 
 `cmake -DCMAKE_BUILD_TYPE=Release . && make unix && ./0hn0t.sh`
 
