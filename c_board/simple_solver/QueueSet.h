@@ -1,3 +1,6 @@
+#include <assert.h>
+#include <stdlib.h>
+
 #include "CSError.h"
 #define MAKE_STR(A, B) A##B
 #define CONCAT(STEM, TYPE) MAKE_STR(STEM, TYPE)

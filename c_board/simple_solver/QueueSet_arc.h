@@ -1,10 +1,6 @@
 #ifndef QUEUESET_ARC
 #define QUEUESET_ARC
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <assert.h>
-
 #include "Var.h"
 #include "Constraint.h"
 
@@ -14,7 +10,7 @@ struct Arc {
         struct Var * var;
         struct Constraint * constraint;
 };
-// #define EQ_ARC(x,y) (((x).var == (y).var) && (x).constraint == (y).constraint)
+
 #define EQ_FUN eq_arc
 static inline
 unsigned long eq_arc(struct Arc * a, struct Arc * b)

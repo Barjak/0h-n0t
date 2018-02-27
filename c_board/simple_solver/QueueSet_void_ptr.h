@@ -1,13 +1,9 @@
 #ifndef QUEUESET_VOID_PTR_H
 #define QUEUESET_VOID_PTR_H
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <assert.h>
-
 #define QTYPE void *
 #define QTYPENAME void_ptr
-// #define EQ_ARC(x,y) (((x).var == (y).var) && (x).constraint == (y).constraint)
+
 #define EQ_FUN eq_void_ptr
 static inline
 unsigned long eq_void_ptr(void ** a, void ** b)

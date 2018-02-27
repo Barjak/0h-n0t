@@ -3,7 +3,6 @@
 
 #include "Var.h"
 #include "CSError.h"
-#include <assert.h>
 
 /*
  * struct Constraint is a tagged union whose tag is the function pointer
@@ -83,7 +82,7 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, bitset * modif
                         //     there exists a v in var_domain
                         //              and a u in g[i+1]      s.t.: v + b = u
                         // The expression
-                        // g[i] |= {1,0} >> b
+                        // g[i] |= {1,0} << b
                         //     writes the result to the appropriate bit
                         g[i] |= !!((c->var[i]->domain << b) & g[i+1]) << b;
                 }

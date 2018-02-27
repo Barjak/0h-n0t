@@ -2,8 +2,6 @@
 #define LNODE_H
 #include "CSError.h"
 #include <stdlib.h>
-#include <stdio.h>
-#include <assert.h>
 
 // Linked list node
 struct LNode {
@@ -15,7 +13,6 @@ struct LNode {
 static inline
 CSError LNode_prepend(struct LNode ** root, void * data, unsigned integer)
 {
-        assert(root);
         if (NULL == root) { goto fail;}
         struct LNode * new_root = malloc(sizeof(struct LNode));
         if (NULL == new_root) { goto bad_alloc1; }
