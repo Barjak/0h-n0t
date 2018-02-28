@@ -1,5 +1,6 @@
 #ifndef CONSTRAINT_H
 #define CONSTRAINT_H
+#include <assert.h>
 
 #include "LNode.h"
 #include "Var.h"
@@ -23,6 +24,11 @@ struct ConstraintVisibility {
         unsigned n_lhs_variables;
 };
 
+struct ConstraintTile {
+        unsigned dir_n[4];
+        unsigned target_value;
+};
+
 struct Constraint {
         unsigned id;
         unsigned n_vars;
@@ -32,6 +38,7 @@ struct Constraint {
         union {
                 struct ConstraintVisibility visibility_data;
                 struct ConstraintSum sum_data;
+                struct ConstraintTile tile_data;
         };
 };
 
@@ -61,6 +68,142 @@ static struct Restriction * Restriction_create(struct Var * v, bitset domain, st
         return r;
 bad_alloc1:
         return NULL;
+}
+
+CSError push_new_restriction( struct LNode * list, struct Var * v, bitset domain, struct Constraint * c)
+{
+        return NO_FAILURE;
+}
+
+// ConstraintTile
+
+static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode ** ret)
+{
+        int modified;
+        int iterations = 0;
+        do {
+                iterations++;
+                modified = 0;
+                unsigned n_blue = 0;
+                unsigned n_blue_dir[4] = {0,0,0,0};
+                // index of the First Empty Domain (FED_i) for each direction
+                // Not using a pointer because we'd like to use the index on the list of vars
+                int FED_i[4] = {-1, -1, -1, -1};
+                unsigned n_empty[4] = {0,0,0,0};
+                unsigned add_one_yield[4] = {0,0,0,0};
+                unsigned how_many_directions = 0;
+                unsigned max_possible = 0;
+                unsigned max_possible_dir[4] = {0,0,0,0};
+                int only_direction = -1;
+
+                for (int d = 0; d < 4; d++) {
+                        for (unsigned i = (d ? c->tile_data.dir_n[d-1] : 0);
+                             i < c->tile_data.dir_n[d];
+                             i++) {
+                                bitset domain = c->domains[i];
+                                if (domain == (RED | BLUE)) {
+                                        if (0 == n_empty[d]) {
+                                                FED_i[d] = i;
+                                                add_one_yield[d]++;
+                                                how_many_directions++;
+                                                only_direction = d;
+                                        }
+                                        n_empty[d]++;
+                                } else if (domain == BLUE) {
+                                        if (0 == n_empty[d]) {
+                                                n_blue++;
+                                                n_blue_dir[d]++;
+                                        } else if (1 == n_empty[d]) {
+                                                add_one_yield[d]++;
+                                        }
+                                        max_possible_dir[d]++;
+                                        max_possible++;
+                                }
+                        }
+                }
+
+                assert(n_blue <= c->tile_data.target_value);
+
+                /* 1 */
+                if (n_blue == c->tile_data.target_value) {
+                        for (int d = 0; d < 4; d++) {
+                                int i = FED_i[d];
+                                if (i != -1) {
+                                        c->domains[i] = RED;
+                                        // The cached domain is less restricted
+                                        struct Restriction * r = Restriction_create(c->vars[i], RED, c);
+                                        LNode_prepend(ret, r, 0);
+                                        modified = 1;
+                                }
+                        }
+                /* 2 */
+                } else if (how_many_directions == 1) {
+                        int i = FED_i[only_direction];
+                        c->domains[i] = BLUE;
+                        struct Restriction * r = Restriction_create(c->vars[i], BLUE, c);
+                        LNode_prepend(ret, r, 0);
+                        modified = 1;
+                } else {
+                        for (int d = 0; d < 4; d++) {
+                                unsigned max_possible_other_directions = (max_possible - max_possible_dir[d]);
+                                /* 3 */
+                                if (add_one_yield[d] + n_blue > c->tile_data.target_value) {
+                                        int i = FED_i[d];
+                                        c->domains[i] = RED;
+                                        struct Restriction * r = Restriction_create(c->vars[i], RED, c);
+                                        LNode_prepend(ret, r, 0);
+                                        modified = 1;
+                                }
+                                /* 4 */
+                                else if (add_one_yield[d] &&
+                                    add_one_yield[d] + n_blue + max_possible_other_directions <= c->tile_data.target_value) {
+                                            int i = FED_i[d];
+                                            c->domains[i] = BLUE;
+                                            struct Restriction * r = Restriction_create(c->vars[i], BLUE, c);
+                                            LNode_prepend(ret, r, 0);
+                                            modified = 1;
+                                }
+                        }
+                }
+        } while (modified);
+        // printf("it %i\n", iterations);
+
+        return NO_FAILURE;
+}
+// tile_bools is 4 different arrays concatenated together
+// each array is in order of increasing distance from origin
+// how_many[4] is the lengths of the 4 arrays
+static inline CSError ConstraintTile_init(struct Constraint * c,
+                                            unsigned target_value,
+                                            struct Var ** tile_bools,
+                                            unsigned how_many[4])
+{
+        c->filter = ConstraintTile_filter;
+        c->n_vars = how_many[0] + how_many[1] + how_many[2] + how_many[3];
+        c->vars = malloc(c->n_vars * sizeof(struct Var *));
+        if (!c->vars) {
+                goto bad_alloc1;
+        }
+        c->domains = malloc(c->n_vars * sizeof(bitset));
+        if (!c->domains) {
+                goto bad_alloc2;
+        }
+
+        for (unsigned i = 0; i < c->n_vars; i++) {
+                c->vars[i] = tile_bools[i];
+        }
+        c->tile_data.dir_n[0] = how_many[0];
+        c->tile_data.dir_n[1] = c->tile_data.dir_n[0] + how_many[1];
+        c->tile_data.dir_n[2] = c->tile_data.dir_n[1] + how_many[2];
+        c->tile_data.dir_n[3] = c->tile_data.dir_n[2] + how_many[3];
+
+        c->tile_data.target_value = target_value;
+
+        return NO_FAILURE;
+bad_alloc2:
+        free(c->vars);
+bad_alloc1:
+        return FAIL_ALLOC;
 }
 
 // ConstraintSum
@@ -280,7 +423,9 @@ static inline CSError Constraint_destroy(struct Constraint * c)
         if (c->filter == ConstraintSum_filter) {
                 fail = ConstraintSum_destroy(c);
         } else if (c->filter == ConstraintVisibility_filter) {
-                fail = ConstraintVisibility_destroy(c);
+                ConstraintVisibility_destroy(c);
+        } else if (c->filter == ConstraintTile_filter) {
+
         }
         return fail;
 }

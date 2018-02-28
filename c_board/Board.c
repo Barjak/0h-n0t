@@ -252,7 +252,7 @@ unsigned maxify(struct Grid * board, int maxAllowed)
 {
         srand(time(0));
 
-        struct QueueSet_void_ptr * Q = QueueSet_create_void_ptr();
+        struct QueueSet_void_ptr * Q = QueueSet_create_void_ptr(board->length);
         if (!Q) {
                 goto bad_alloc1;
         }

@@ -245,6 +245,7 @@ CSError Problem_create_registry(struct Problem * p)
                 struct Constraint * list = block->data;
                 for (struct Constraint * c = list; c < list + block->integer; c++) {
                         unsigned id = c->id;
+                        // printf("id: %u\n", id);
                         c_register[id].constraint = c;
                         c_register[id].active = 1;
                         c_register[id].instances = NULL;
@@ -271,6 +272,8 @@ CSError Problem_create_registry(struct Problem * p)
                 assert(cr->constraint != NULL);
                 struct Var ** vars = cr->constraint->vars;
                 for (unsigned v_i = 0; v_i < cr->constraint->n_vars; v_i++) {
+                        // printf("v_i %u\n", v_i);
+                        // printf("vars %ul\n", vars[v_i]);
                         unsigned v_id = vars[v_i]->id;
                         var_registry[v_id].n_constraints += 1;
                         total_array_size += 1;
@@ -337,6 +340,7 @@ struct Constraint * Problem_create_empty_constraints(struct Problem * p, unsigne
                 return NULL;
         }
         LNode_prepend(&p->constraint_llist, block, n);
+        // printf("%lu\n",(unsigned long)p->constraint_llist);
         for (unsigned i = 0; i < n; i++) {
                 block[i].id = p->n_constraints++;
         }
