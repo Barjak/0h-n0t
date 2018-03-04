@@ -14,6 +14,9 @@
 #ifndef min
 #        define min(x,y) ((x) < (y)?(x):(y))
 #endif
+#ifndef max
+#        define max(x,y) ((x) > (y)?(x):(y))
+#endif
 #define IS_WALL(type) ((type) == WALL)
 #define RANDOM(n) (int)(rand() / ((double)RAND_MAX / (n)  + 1))
 Vector Directions[4] = {{.x = 0,  .y = -1},
@@ -24,30 +27,30 @@ Vector Directions[4] = {{.x = 0,  .y = -1},
 typedef enum { ACTIVE = 0, INACTIVE = 1, TABOO = 2} State;
 
 struct TileData {
-        State state;
-        bitset old_domain;
-        struct Var * var;
-        unsigned n_constraints;
+        State               state;
+        bitset              old_domain;
+        struct Var        * var;
+        unsigned            n_constraints;
         struct Constraint * constraints[5];
 };
 
 struct UndoAction {
         struct Tile * tile;
-        Type old_type;
-        Type new_type;
+        Type          old_type;
+        Type          new_type;
 };
 
 struct ProblemData {
         struct Problem * problem;
 
-        unsigned *order;
-        unsigned i;
+        unsigned       * order;
+        unsigned         i;
 
-        unsigned n_empty;
-        struct LNode * mistakes;
+        unsigned         n_empty;
+        struct LNode   * mistakes;
 
-        unsigned length;
-        struct TileData tile_data[];
+        unsigned         length;
+        struct TileData  tile_data[];
 
 };
 ///////////////////
@@ -306,11 +309,11 @@ bad_alloc1:
 // ProblemData
 //////////////
 
-struct ProblemData * PData_create(struct Grid * grid)
+struct ProblemData * PData_create(struct Grid * grid, int simple)
 {
+// Initialize things
         unsigned len = grid->length;
         struct ProblemData * pdata = malloc(sizeof(struct ProblemData) + len * sizeof(struct TileData));
-// Problem definition
         if (! pdata) {
                 goto bad_alloc1;
         }
@@ -322,7 +325,7 @@ struct ProblemData * PData_create(struct Grid * grid)
         struct Var * tile_bools = Problem_create_vars(p, len, 2);
         struct Var * RED_const = Problem_create_vars(p, 1, 2);
         Var_set(RED_const, RED);
-        // Read
+// Read
         for (unsigned i = 0; i < len; i++) {
                 switch (grid->tiles[i].type) {
                 case NUMBER:
@@ -353,54 +356,85 @@ struct ProblemData * PData_create(struct Grid * grid)
         pdata->i = 0;
         pdata->mistakes = NULL;
 
-// Define the problem
+        unsigned max_tile_in_board = 0;
         for (unsigned i = 0; i < len; i++) {
-                if (grid->tiles[i].type != NUMBER) {
-                        continue;
-                }
-                unsigned max_n_tiles = grid->tiles[i].value;
-                unsigned n_valid_directions = 0;
-                struct Var * dir[4];
+                max_tile_in_board = max(grid->tiles[i].value, max_tile_in_board);
+        }
 
-                for (Direction d = 0; d < 4; d++) {
-                        struct Var * vars[DOMAIN_SIZE+1];
-                        struct Tile * t = &grid->tiles[i];
-                        unsigned current_distance = 0;
-                        while((t = t->dir[d])) {
-                                vars[current_distance++] = &tile_bools[t->id];
-                                if (current_distance == max_n_tiles + 1) {
-                                        break;
-                                }
-                        }
-                        // If there are no tiles in this direction, continue
-                        if (current_distance == 0) {
+        struct Var ** vars = malloc(4 * (max_tile_in_board+1) * sizeof(struct Var *));
+        if (!vars) {
+                goto bad_alloc3;
+        }
+// Define the problem
+        if (!simple) {
+                for (unsigned i = 0; i < len; i++) {
+                        if (grid->tiles[i].type != NUMBER) {
                                 continue;
                         }
-                        // handle the case where we stopped at an edge
-                        if (current_distance <= max_n_tiles) {
-                                vars[current_distance++] = RED_const;
-                                // printf("%i ", RED_const->id);
-                        }
-                        dir[n_valid_directions] = Problem_create_vars(p, 1, current_distance);
-                        // printf("-> %i ", dir[n_valid_directions]->id);
+                        unsigned target_value = grid->tiles[i].value;
+                        unsigned n_valid_directions = 0;
+                        struct Var * dir[4];
 
-                        struct Constraint * how_many_visible = Problem_create_empty_constraints(p, 1);
-                        // printf(" #%i\n", how_many_visible->id);
-                        ConstraintVisibility_init(how_many_visible, vars, current_distance, dir[n_valid_directions]);
-                        n_valid_directions++;
+                        for (Direction d = 0; d < 4; d++) {
+                                struct Tile * t = &grid->tiles[i];
+                                unsigned current_distance = 0;
+                                while((t = t->dir[d])) {
+                                        vars[current_distance++] = &tile_bools[t->id];
+                                        if (current_distance == target_value + 1) {
+                                                break;
+                                        }
+                                }
+                                // If there are no tiles in this direction, continue
+                                if (current_distance == 0) {
+                                        continue;
+                                }
+                                // handle the case where we stopped at an edge
+                                if (current_distance <= target_value) {
+                                        vars[current_distance++] = RED_const;
+                                }
+                                dir[n_valid_directions] = Problem_create_vars(p, 1, current_distance);
+                                struct Constraint * how_many_visible = Problem_create_empty_constraints(p, 1);
+                                ConstraintVisibility_init(how_many_visible, vars, current_distance, dir[n_valid_directions]);
+                                n_valid_directions++;
+                                // Remember
+                                tile_data[i].constraints[tile_data[i].n_constraints++] = how_many_visible;
+                        }
+                        struct Constraint * sum = Problem_create_empty_constraints(p, 1);
+                        ConstraintSum_init(sum, 1<<target_value, dir, n_valid_directions);
                         // Remember
-                        tile_data[i].constraints[tile_data[i].n_constraints++] = how_many_visible;
+                        tile_data[i].constraints[tile_data[i].n_constraints++] = sum;
                 }
-                struct Constraint * sum = Problem_create_empty_constraints(p, 1);
-                // printf("\tS = %i\n", sum->id);
-                ConstraintSum_init(sum, 1<<max_n_tiles, dir, n_valid_directions);
-                // Remember
-                tile_data[i].constraints[tile_data[i].n_constraints++] = sum;
+        } else {
+                for (unsigned i = 0; i < len; i++) {
+                        if (grid->tiles[i].type != NUMBER) {
+                                continue;
+                        }
+                        unsigned target_value = grid->tiles[i].value;
+                        unsigned current_distances[4] = {0,0,0,0};
+                        unsigned n_neighbors = 0;
+                        for (Direction d = 0; d < 4; d++) {
+                                struct Tile * t = &grid->tiles[i];
+                                while ((t = t->dir[d])) {
+                                        vars[n_neighbors++] = &tile_bools[t->id];
+                                        current_distances[d]++;
+                                        if (current_distances[d] == target_value + 1) {
+                                                break;
+                                        }
+                                }
+                        }
+                        struct Constraint * tile = Problem_create_empty_constraints(p, 1);
+                        ConstraintTile_init(tile, target_value, vars, current_distances);
+                        // Remember
+                        tile_data[i].constraints[tile_data[i].n_constraints++] = tile;
+                }
         }
+        free(vars);
 
         Problem_create_registry(p);
         Problem_solve(p);
         return pdata;
+bad_alloc3:
+        Problem_destroy(p);
 bad_alloc2:
         free(pdata);
 bad_alloc1:
@@ -533,42 +567,10 @@ void Board_init_solver(struct Board * board)
         assert(board->min_grid);
         assert(board->max_grid);
         assert(board->min_tile_mask);
-        board->private = PData_create(board->min_grid);
+        board->private = PData_create(board->min_grid, 1);
         assert(board->private);
 }
-void print1(struct Grid * board, struct TileData * td)
-{
-        printf("%i %i\n", board->height, board->width);
-        for (int y = 0; y < board->height; y++) {
-                for (int x = 0; x < board->width; x++) {
-                        unsigned i = y*board->width+x;
 
-                        switch (td[i].var->domain) {
-                        case (BLUE | RED):
-
-                                printf(" . ");
-                                break;
-                        case BLUE:
-                                if (board->tiles[i].type == NUMBER) {
-                                        printf("%2i ", board->tiles[i].value);
-                                        continue;
-                                } else {
-                                        printf(" = ");
-                                }
-                                break;
-                        case RED:
-                                printf("## ");
-                                break;
-                        default:
-                        // assert(td[i].var->domain);
-                        // printf("%u\n", td[i].var->domain);
-                                printf(" 0 ");
-                                break;
-                        }
-               }
-                printf("\n");
-        }
-}
 struct Hint Board_get_hint(struct Board * board)
 {
         struct ProblemData * pdata = Board_pdata(board);
@@ -582,7 +584,6 @@ struct Hint Board_get_hint(struct Board * board)
                 // Set the problem to the current board state
                 struct Problem * p = pdata->problem;
                 struct QueueSet_void_ptr * Q = p->Q;
-                // print1(board->max_grid, Board_pdata(board)->tile_data);
                 for (unsigned i = 0; i < board->length; i++) {
                         Problem_var_reset_domain(pdata->problem,
                                                  pdata->tile_data[i].var,
@@ -639,7 +640,7 @@ unsigned Board_initialize(struct Board * board, unsigned max_tile)
         maxify(board->max_grid, max_tile);
         Grid_copy_to(board->max_grid, board->min_grid);
 
-        board->private = PData_create(board->min_grid);
+        board->private = PData_create(board->min_grid, 1);
         assert(board->private);
 
         return NO_FAILURE;
@@ -752,7 +753,7 @@ int Board_is_solved(struct Board * board)
 void Board_print(struct Board * board)
 {
         printf("??? %u %u\n", board->width, board->height);
-        Grid_print(board->max_grid);
+        Grid_print(board->min_grid);
 }
 
 struct bin_tile {
@@ -890,4 +891,17 @@ cannot_read_header:
         fclose(fp);
 cannot_open:
         return NULL;
+}
+
+
+int main()
+{
+        int size = 40;
+        struct Board * board = Board_create(size, size);
+        Board_initialize(board, 9);
+        Board_reduce(board, size * size);
+        Board_print(board);
+
+        Board_print(board);
+        return 0;
 }

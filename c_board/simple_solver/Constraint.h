@@ -96,9 +96,7 @@ bad_alloc1:
 static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode ** restrictions_return)
 {
         int modified;
-        int iterations = 0;
         do {
-                iterations++;
                 modified = 0;
                 unsigned n_blue = 0;
                 unsigned n_blue_dir[4] = {0,0,0,0};
@@ -132,14 +130,17 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                         } else if (1 == n_empty[d]) {
                                                 add_one_yield[d]++;
                                         }
-                                        max_possible_dir[d]++;
-                                        max_possible++;
+                                } else if (domain == RED) {
+                                        break;
+                                } else {
+                                        assert(0);
                                 }
+                                max_possible++;
+                                max_possible_dir[d]++;
                         }
                 }
 
                 assert(n_blue <= c->tile_data.target_value);
-
                 /* 1 */
                 if (n_blue == c->tile_data.target_value) {
                         for (int d = 0; d < 4; d++) {
@@ -151,6 +152,7 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                                 goto bad_alloc1;
                                         }
                                         modified = 1;
+                                        break;
                                 }
                         }
                 /* 2 */
@@ -161,6 +163,7 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                 goto bad_alloc1;
                         }
                         modified = 1;
+                        break;
                 } else {
                         for (int d = 0; d < 4; d++) {
                                 unsigned max_possible_other_directions = (max_possible - max_possible_dir[d]);
@@ -172,24 +175,27 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                                 goto bad_alloc1;
                                         }
                                         modified = 1;
+                                        break;
                                 }
                                 /* 4 */
-                                else if (add_one_yield[d] &&
-                                    add_one_yield[d] + n_blue + max_possible_other_directions <= c->tile_data.target_value) {
-                                            int i = FED_i[d];
-                                            c->domains[i] = BLUE;
-                                            if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
-                                                    goto bad_alloc1;
-                                            }
-                                            modified = 1;
-                                }
+                                // FIXME: Why does this make worse boards?
+                                // else if (FED_i[d] != -1 &&
+                                //          add_one_yield[d] + n_blue + max_possible_other_directions <= c->tile_data.target_value) {
+                                //             int i = FED_i[d];
+                                //             c->domains[i] = BLUE;
+                                //             if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
+                                //                     goto bad_alloc1;
+                                //             }
+                                //             modified = 1;
+                                //             break;
+                                // }
                         }
                 }
         } while (modified);
-        // printf("it %i\n", iterations);
 
         return NO_FAILURE;
 bad_alloc1:
+        LNode_destroy_and_free_data(restrictions_return);
         return FAIL_ALLOC;
 }
 // tile_bools is 4 different arrays concatenated together
