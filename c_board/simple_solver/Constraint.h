@@ -6,15 +6,8 @@
 #include "Var.h"
 #include "CSError.h"
 
-
-/*
- * struct Constraint is a tagged union whose tag is the function pointer
- * unsigned (*filter)(struct Constraint*, bitset*)
- *
-*/
-
 ////////
-// Constraint Structures
+// Constraint-specific Structures
 ////////
 struct ConstraintSum {
         bitset domain;
@@ -29,17 +22,28 @@ struct ConstraintTile {
         unsigned target_value;
 };
 
+/**
+ * struct Constraint is a tagged union whose tag is @<.filter@>
+ */
 struct Constraint {
-        unsigned id;
-        unsigned n_vars;
-        struct Var ** vars;
-        bitset * domains;
-        CSError (*filter)(struct Constraint*, struct LNode **);
+        unsigned      id;      /**< Index used by the solver. */
+        unsigned      n_vars;  /**< Number of variables used by this constraint. */
+        struct Var ** vars;    /**< List of pointers to variables.
+                                    Every variable used by the filter MUST be in this list. */
+        bitset      * domains; /**< Before invoking a filter, each variable's domain is copied
+                                    here to use as a scratchpad. At some point in the future, this
+                                    will reduce the number of copy operations and cache misses. */
+        CSError    (* filter)(struct Constraint*, struct LNode **);
+        /**< A domain propagation algorithm that also acts as a type tag.
+             Invoking a filter passes back a linked list of domain restrictions.
+             The solver applies the domain restrictions when it feels like it.
+             Filters invoke @<C_push_restriction_on_nth_var()@> when they find a domain reduction. */
         union {
                 struct ConstraintVisibility visibility_data;
-                struct ConstraintSum sum_data;
-                struct ConstraintTile tile_data;
-        };
+                struct ConstraintSum        sum_data;
+                struct ConstraintTile       tile_data;
+        }; /**< This anonymous union contains constraint-specific data structures
+                which indicate how the constraint's list of pointers is structured. */
 };
 
 struct Restriction {
@@ -47,10 +51,10 @@ struct Restriction {
         bitset               domain;
         struct Constraint  * constraint;
 
-        struct Restriction * var_restrict_prev; // List of definition Restrictions
-        struct LNode       * implications; // (struct Restriction*)implications->data
-        unsigned             n_necessary_conditions;
-        struct Restriction * necessary_conditions[];
+        struct Restriction * var_restrict_prev;      /**< The variable's previous restriction. */
+        struct LNode       * implications;           /**< Linked list of child restrictions. */
+        unsigned             n_necessary_conditions; /**< Number of parent restrictions. */
+        struct Restriction * necessary_conditions[]; /**< A flat list of parent restrictions. */
 };
 
 static struct Restriction * Restriction_create(struct Var * v, bitset domain, struct Constraint * c)
@@ -70,14 +74,26 @@ bad_alloc1:
         return NULL;
 }
 
-CSError push_new_restriction( struct LNode * list, struct Var * v, bitset domain, struct Constraint * c)
+static inline CSError C_push_restriction_on_nth_var(struct Constraint * c, int index, bitset domain, struct LNode ** list)
 {
+        struct Restriction * r = Restriction_create(c->vars[index], domain, c);
+        if (!r) {
+                goto bad_alloc1;
+        }
+        if (FAIL_ALLOC == LNode_prepend(list, r, 0)) {
+                goto bad_alloc2;
+        }
         return NO_FAILURE;
+bad_alloc2:
+        free(r);
+bad_alloc1:
+        return FAIL_ALLOC;
+
 }
 
 // ConstraintTile
 
-static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode ** ret)
+static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode ** restrictions_return)
 {
         int modified;
         int iterations = 0;
@@ -130,9 +146,10 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                 int i = FED_i[d];
                                 if (i != -1) {
                                         c->domains[i] = RED;
-                                        // The cached domain is less restricted
-                                        struct Restriction * r = Restriction_create(c->vars[i], RED, c);
-                                        LNode_prepend(ret, r, 0);
+                                        // RED is always more restricted than the domain in question if we get here
+                                        if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, RED, restrictions_return)) {
+                                                goto bad_alloc1;
+                                        }
                                         modified = 1;
                                 }
                         }
@@ -140,8 +157,9 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                 } else if (how_many_directions == 1) {
                         int i = FED_i[only_direction];
                         c->domains[i] = BLUE;
-                        struct Restriction * r = Restriction_create(c->vars[i], BLUE, c);
-                        LNode_prepend(ret, r, 0);
+                        if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
+                                goto bad_alloc1;
+                        }
                         modified = 1;
                 } else {
                         for (int d = 0; d < 4; d++) {
@@ -150,8 +168,9 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                 if (add_one_yield[d] + n_blue > c->tile_data.target_value) {
                                         int i = FED_i[d];
                                         c->domains[i] = RED;
-                                        struct Restriction * r = Restriction_create(c->vars[i], RED, c);
-                                        LNode_prepend(ret, r, 0);
+                                        if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, RED, restrictions_return)) {
+                                                goto bad_alloc1;
+                                        }
                                         modified = 1;
                                 }
                                 /* 4 */
@@ -159,8 +178,9 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                     add_one_yield[d] + n_blue + max_possible_other_directions <= c->tile_data.target_value) {
                                             int i = FED_i[d];
                                             c->domains[i] = BLUE;
-                                            struct Restriction * r = Restriction_create(c->vars[i], BLUE, c);
-                                            LNode_prepend(ret, r, 0);
+                                            if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
+                                                    goto bad_alloc1;
+                                            }
                                             modified = 1;
                                 }
                         }
@@ -169,14 +189,16 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
         // printf("it %i\n", iterations);
 
         return NO_FAILURE;
+bad_alloc1:
+        return FAIL_ALLOC;
 }
 // tile_bools is 4 different arrays concatenated together
 // each array is in order of increasing distance from origin
 // how_many[4] is the lengths of the 4 arrays
 static inline CSError ConstraintTile_init(struct Constraint * c,
-                                            unsigned target_value,
-                                            struct Var ** tile_bools,
-                                            unsigned how_many[4])
+                                          unsigned target_value,
+                                          struct Var ** tile_bools,
+                                          unsigned how_many[4])
 {
         c->filter = ConstraintTile_filter;
         c->n_vars = how_many[0] + how_many[1] + how_many[2] + how_many[3];
@@ -210,7 +232,7 @@ bad_alloc1:
 
 /* Following Trick 2003
  */
-static inline CSError ConstraintSum_filter(struct Constraint * c, struct LNode ** ret)
+static inline CSError ConstraintSum_filter(struct Constraint * c, struct LNode ** restrictions_return)
 {
         unsigned fail = 0;
         unsigned N = c->n_vars;
@@ -242,6 +264,7 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, struct LNode *
         g[N] = f[N] & c->sum_data.domain;
         fail |= !g[N];
         if (fail) {
+                fail = FAILURE;
                 goto cleanup;
         }
 
@@ -265,11 +288,15 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, struct LNode *
                         reduced_domain |= ((c->domains[i] & 1<<b) && ((f[i] << b) & g[i+1])) << b;
                 }
                 if (c->domains[i] != reduced_domain) {
-                        struct Restriction * r = Restriction_create(c->vars[i], reduced_domain, c);
-                        LNode_prepend(ret, r, 0);
+                        if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, reduced_domain, restrictions_return)) {
+                                goto bad_alloc3;
+                        }
                 }
-                // c->domains[i] = reduced_domain; // Not necessary
         }
+
+        goto cleanup;
+bad_alloc3:
+        LNode_destroy_and_free_data(restrictions_return);
 cleanup:
 bad_alloc2:
         free(g);
@@ -304,22 +331,10 @@ bad_alloc1:
         return FAIL_ALLOC;
 }
 
-static inline CSError ConstraintSum_destroy(struct Constraint * c)
-{
-        if (!c->vars || !c->domains) {
-                goto fail;
-        }
-        free(c->vars);
-        free(c->domains);
-        return NO_FAILURE;
-fail:
-        return FAILURE;
-}
-
 // ConstraintVisibility
 
 // There's probably a one liner that does this.
-static inline CSError ConstraintVisibility_filter(struct Constraint * c, struct LNode ** ret)
+static inline CSError ConstraintVisibility_filter(struct Constraint * c, struct LNode ** restrictions_return)
 {
         unsigned n_lhs = c->n_vars - 1; // Cardinality var
         unsigned rhs_i = c->n_vars - 1; // Index var
@@ -355,22 +370,28 @@ static inline CSError ConstraintVisibility_filter(struct Constraint * c, struct 
         for (unsigned b = 0; b < n_lhs; b++) {
                 bitset reduced_domain = (!!(B & 1<<b) << BLUEBIT) | (!!(R & 1<<b) << REDBIT);
                 if (c->domains[b] != reduced_domain) {
-                        struct Restriction * r = Restriction_create(c->vars[b], reduced_domain, c);
-                        LNode_prepend(ret, r, 0);
+                        if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, b, reduced_domain, restrictions_return)) {
+                                goto bad_alloc1;
+                        }
                 }
         }
         if (c->domains[rhs_i] != y) {
-                struct Restriction * r = Restriction_create(c->vars[rhs_i], y, c);
-                LNode_prepend(ret, r, 0);
+                if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, rhs_i, y, restrictions_return)) {
+                        goto bad_alloc2;
+                }
         }
 
         return NO_FAILURE;
+bad_alloc1:
+bad_alloc2:
+        LNode_destroy_and_free_data(restrictions_return);
+        return FAIL_ALLOC;
 }
 
 static inline CSError ConstraintVisibility_init(struct Constraint * c,
-                                                 struct Var ** lhsvars,
-                                                 unsigned n_lhsvars,
-                                                 struct Var *rhsvar)
+                                                struct Var ** lhsvars,
+                                                unsigned n_lhsvars,
+                                                struct Var *rhsvar)
 {
         c->filter = ConstraintVisibility_filter;
         c->n_vars = n_lhsvars + 1;
@@ -393,7 +414,7 @@ bad_alloc1:
         return FAIL_ALLOC;
 }
 
-static inline CSError ConstraintVisibility_destroy(struct Constraint * c)
+static inline CSError Constraint_generic_destroy(struct Constraint * c)
 {
         if (!c->vars || !c->domains) {
                 goto fail;
@@ -410,22 +431,27 @@ fail:
 ////////
 static inline CSError Constraint_filter(struct Constraint * c, struct LNode ** ret)
 {
+        if (!ret || !c) {
+                goto bad_input;
+        }
         for (unsigned i = 0; i < c->n_vars; i++) {
                 c->domains[i] = c->vars[i]->domain;
         }
         *ret = NULL;
         return c->filter(c, ret);
+bad_input:
+        return FAIL_PARAM;
 }
 
 static inline CSError Constraint_destroy(struct Constraint * c)
 {
         CSError fail = NO_FAILURE;
         if (c->filter == ConstraintSum_filter) {
-                fail = ConstraintSum_destroy(c);
+                fail = Constraint_generic_destroy(c);
         } else if (c->filter == ConstraintVisibility_filter) {
-                ConstraintVisibility_destroy(c);
+                fail = Constraint_generic_destroy(c);
         } else if (c->filter == ConstraintTile_filter) {
-
+                fail = Constraint_generic_destroy(c);
         }
         return fail;
 }

@@ -135,6 +135,8 @@ CSError Problem_solve_queue(struct Problem * p)
                         if (r->domain == 0) {
                                 goto infeasible;
                         }
+                        // TODO: all restrictions in the list should have the same necessary conditions
+                        //       instead of depending on their siblings.
                         fail = Problem_add_DAG_node(p, r);
                         NOFAIL(fail);
                         // Push every arc that touches one of this var's constraints
