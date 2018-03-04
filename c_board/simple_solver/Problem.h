@@ -7,7 +7,6 @@
 
 #include "Var.h"
 #include "Constraint.h"
-#include "QueueSet_arc.h"
 #include "CSError.h"
 #include "LNode.h"
 
