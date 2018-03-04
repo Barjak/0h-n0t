@@ -386,14 +386,14 @@ struct ProblemData * PData_create(struct Grid * grid)
 
                         struct Constraint * how_many_visible = Problem_create_empty_constraints(p, 1);
                         // printf(" #%i\n", how_many_visible->id);
-                        ConstraintVisibility_create(how_many_visible, vars, current_distance, dir[n_valid_directions]);
+                        ConstraintVisibility_init(how_many_visible, vars, current_distance, dir[n_valid_directions]);
                         n_valid_directions++;
                         // Remember
                         tile_data[i].constraints[tile_data[i].n_constraints++] = how_many_visible;
                 }
                 struct Constraint * sum = Problem_create_empty_constraints(p, 1);
                 // printf("\tS = %i\n", sum->id);
-                ConstraintSum_create(sum, 1<<max_n_tiles, dir, n_valid_directions);
+                ConstraintSum_init(sum, 1<<max_n_tiles, dir, n_valid_directions);
                 // Remember
                 tile_data[i].constraints[tile_data[i].n_constraints++] = sum;
         }
@@ -581,7 +581,7 @@ struct Hint Board_get_hint(struct Board * board)
                 // There are no mistakes so invoke the solver
                 // Set the problem to the current board state
                 struct Problem * p = pdata->problem;
-                struct QueueSet_arc * Q = p->Q;
+                struct QueueSet_void_ptr * Q = p->Q;
                 // print1(board->max_grid, Board_pdata(board)->tile_data);
                 for (unsigned i = 0; i < board->length; i++) {
                         Problem_var_reset_domain(pdata->problem,
@@ -593,48 +593,43 @@ struct Hint Board_get_hint(struct Board * board)
                         if (c->active == 0) {
                                 continue;
                         }
-                        for (unsigned i = 0; i < c->constraint->n_vars; i++) {
-                                QueueSet_insert_arc(Q, (struct Arc){c->constraint->var[i], c->constraint});
-                        }
+                        QueueSet_insert_void_ptr(Q, c->constraint);
                 }
                 int fail = NO_FAILURE;
                 while (Q->n_entries != 0) {
                         // Pop from Queue
-                        struct Arc arc;
-                        fail = QueueSet_pop_arc(Q, &arc);
+                        struct Constraint * c = NULL;
+                        fail = QueueSet_pop_void_ptr(Q, (void**)&c);
                         NOFAIL(fail);
-                        if (!P_cons_is_active(p, arc.constraint)) {
+                        if ( ! P_cons_is_active(p, c)) {
                                 continue;
                         }
-                        struct Restriction * restriction;
-                        fail = Problem_get_restriction(p, arc.constraint, arc.var, &restriction);
+                        struct LNode * restrictions = NULL;
+                        fail = Constraint_filter(c, &restrictions);
                         NOFAIL(fail);
 
-                        if (restriction != NULL) {
+                        while (restrictions) {
+                                struct Restriction * r = LNode_pop(&restrictions);
+
                                 // POTENTIAL FIXME: noncompliant
-                                ptrdiff_t v_i = (arc.var - pdata->tile_data[0].var);
+                                ptrdiff_t v_i = (r->var - pdata->tile_data[0].var);
                                 if (v_i >= 0 && v_i < board->length) {
                                         ret.tile = &board->min_grid->tiles[v_i];
                                         ret.id = (int)v_i;
                                         ret.type = board->max_grid->tiles[ret.id].type;
-                                        // assert(t2bits(&board->max_grid->tiles[ret.id]) == restriction->domain);
-                                        free(restriction);
-
+                                        free(r);
+                                        LNode_destroy_and_free_data(restrictions);
                                         break;
                                 }
                                 // assert(! HashSet_contains_void_ptr(pdata->vars_set, arc.var));
                                 // assert(HashSet_contains_void_ptr(pdata->vars_set, pdata->tile_data[0].var));
 
-                                assert(restriction->domain);
-                                fail = Problem_add_DAG_node(p, restriction);
+                                fail = Problem_add_DAG_node(p, r);
                                 NOFAIL(fail);
-                                assert(arc.var->domain);
-                                Problem_enqueue_related_arcs(p, arc);
+                                assert(r->var->domain);
+                                Problem_enqueue_related_constraints(p, r->var);
                         }
-                        assert(arc.var->domain);
-
                 }
-                // print1(board->max_grid, pdata->tile_data);
         }
         return ret;
 }
@@ -842,7 +837,9 @@ struct Board * Board_read(unsigned * n_seconds)
         unsigned length = header[0],
                  width  = header[1],
                  height = header[2];
-        *n_seconds = header[3];
+        if (n_seconds) {
+                *n_seconds = header[3];
+        }
 
         tiles = malloc(length * sizeof(struct bin_tile));
         if (!tiles) {

@@ -1,8 +1,10 @@
 #ifndef CONSTRAINT_H
 #define CONSTRAINT_H
 
+#include "LNode.h"
 #include "Var.h"
 #include "CSError.h"
+
 
 /*
  * struct Constraint is a tagged union whose tag is the function pointer
@@ -24,26 +26,52 @@ struct ConstraintVisibility {
 struct Constraint {
         unsigned id;
         unsigned n_vars;
-        struct Var ** var;
-        bitset * cached_domains;
-        unsigned (*filter)(struct Constraint*, bitset*);
+        struct Var ** vars;
+        bitset * domains;
+        CSError (*filter)(struct Constraint*, struct LNode **);
         union {
                 struct ConstraintVisibility visibility_data;
                 struct ConstraintSum sum_data;
         };
 };
 
+struct Restriction {
+        struct Var         * var;
+        bitset               domain;
+        struct Constraint  * constraint;
+
+        struct Restriction * var_restrict_prev; // List of definition Restrictions
+        struct LNode       * implications; // (struct Restriction*)implications->data
+        unsigned             n_necessary_conditions;
+        struct Restriction * necessary_conditions[];
+};
+
+static struct Restriction * Restriction_create(struct Var * v, bitset domain, struct Constraint * c)
+{
+        unsigned N = c ? c->n_vars : 0;
+        struct Restriction * r = malloc(sizeof(struct Restriction) + N * sizeof(struct Restriction*));
+        if (!r) { goto bad_alloc1; }
+        *r = (struct Restriction){
+                .var                    = v,
+                .domain                 = domain,
+                .constraint             = c,
+                .var_restrict_prev      = NULL,
+                .implications           = NULL,
+                .n_necessary_conditions = N};
+        return r;
+bad_alloc1:
+        return NULL;
+}
+
 // ConstraintSum
 
 /* Following Trick 2003
  */
-static inline CSError ConstraintSum_filter(struct Constraint * c, bitset * modified_domains)
+static inline CSError ConstraintSum_filter(struct Constraint * c, struct LNode ** ret)
 {
         unsigned fail = 0;
         unsigned N = c->n_vars;
 
-        bitset modified = 0;
-        struct ConstraintSum * cs = &c->sum_data;
         bitset * f = malloc((N+1) * sizeof(bitset));
         if (!f) {
                 fail = FAIL_ALLOC;
@@ -55,7 +83,7 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, bitset * modif
                 goto bad_alloc2;
         }
 
-        for (unsigned i = 1; i <= N; i++) {
+        for (unsigned i = 0; i <= N; i++) {
                 f[i] = 0;
                 g[i] = 0;
         }
@@ -63,12 +91,12 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, bitset * modif
         for (unsigned i = 1; i <= N; i++) {
                 for (unsigned b = 0; b < DOMAIN_SIZE; b++) {
                         if (f[i-1] & (1 << b)) {
-                                f[i] |= c->var[i-1]->domain << b;
+                                f[i] |= c->domains[i-1] << b;
                         }
                 }
         }
 
-        g[N] = f[N] & cs->domain;
+        g[N] = f[N] & c->sum_data.domain;
         fail |= !g[N];
         if (fail) {
                 goto cleanup;
@@ -77,92 +105,90 @@ static inline CSError ConstraintSum_filter(struct Constraint * c, bitset * modif
         for (int i = N-1; i >= 0; i--) {
                 for (unsigned b = 0; b < DOMAIN_SIZE; b++) {
                         // The expression
-                        // !!((var_domain >> b) & g[i+1])
+                        // !!((domains[i] << b) & g[i+1])
                         //     is 1 iff
-                        //     there exists a v in var_domain
+                        //     there exists a v in domains[i]
                         //              and a u in g[i+1]      s.t.: v + b = u
                         // The expression
                         // g[i] |= {1,0} << b
                         //     writes the result to the appropriate bit
-                        g[i] |= !!((c->var[i]->domain << b) & g[i+1]) << b;
+                        g[i] |= !!((c->domains[i] << b) & g[i+1]) << b;
                 }
                 g[i] &= f[i];
         }
         for (unsigned i = 0; i < N; i++) {
-                c->cached_domains[i] = 0;
+                bitset reduced_domain = 0;
                 for (unsigned b = 0; b < DOMAIN_SIZE; b++) {
-                        c->cached_domains[i] |= ((c->var[i]->domain & 1<<b)
-                                                   && ((f[i] << b) & g[i+1])) << b;
-                        modified |= (c->cached_domains[i] != c->var[i]->domain) << i;
+                        reduced_domain |= ((c->domains[i] & 1<<b) && ((f[i] << b) & g[i+1])) << b;
                 }
+                if (c->domains[i] != reduced_domain) {
+                        struct Restriction * r = Restriction_create(c->vars[i], reduced_domain, c);
+                        LNode_prepend(ret, r, 0);
+                }
+                // c->domains[i] = reduced_domain; // Not necessary
         }
 cleanup:
 bad_alloc2:
         free(g);
 bad_alloc1:
         free(f);
-        if (modified_domains) {
-                *modified_domains = modified;
-        }
         return fail;
 }
 
-static inline CSError ConstraintSum_create(struct Constraint * c,
+static inline CSError ConstraintSum_init(struct Constraint * c,
                                           bitset domain,
                                           struct Var ** addends,
                                           unsigned n_addends)
 {
         c->filter = ConstraintSum_filter;
         c->n_vars = n_addends;
-        c->var = malloc(c->n_vars * sizeof(struct Var*));
-        if (!c->var) { goto bad_alloc1; }
-        c->cached_domains = malloc(c->n_vars * sizeof(bitset));
-        if (!c->cached_domains) { goto bad_alloc2; }
+        c->vars = malloc(c->n_vars * sizeof(struct Var*));
+        if (!c->vars) { goto bad_alloc1; }
+        c->domains = malloc(c->n_vars * sizeof(bitset));
+        if (!c->domains) { goto bad_alloc2; }
 
         for (unsigned i = 0; i < c->n_vars; i++) {
-                c->var[i] = addends[i];
-                c->cached_domains[i] = addends[i]->domain;
+                c->vars[i] = addends[i];
+                c->domains[i] = addends[i]->domain;
         }
 
         c->sum_data.domain = domain;
         return NO_FAILURE;
 
 bad_alloc2:
-        free(c->var);
+        free(c->vars);
 bad_alloc1:
         return FAIL_ALLOC;
 }
 
 static inline CSError ConstraintSum_destroy(struct Constraint * c)
 {
-        if (!c->var || !c->cached_domains) { goto fail; }
-        free(c->var);
-        free(c->cached_domains);
+        if (!c->vars || !c->domains) {
+                goto fail;
+        }
+        free(c->vars);
+        free(c->domains);
         return NO_FAILURE;
 fail:
-        printf("Constraint not initialized.\n");
-        return FAIL_ALLOC;
+        return FAILURE;
 }
 
 // ConstraintVisibility
 
 // There's probably a one liner that does this.
-static inline CSError ConstraintVisibility_filter(struct Constraint * c, bitset * modified_domains)
+static inline CSError ConstraintVisibility_filter(struct Constraint * c, struct LNode ** ret)
 {
         unsigned n_lhs = c->n_vars - 1; // Cardinality var
         unsigned rhs_i = c->n_vars - 1; // Index var
-        bitset modified = 0;
-        // Load domains
+
         bitset R = 0;
         bitset B = 0;
         bitset y = 0;
-        c->cached_domains[rhs_i] = c->var[rhs_i]->domain;
-        y = c->cached_domains[rhs_i];
+        y = c->domains[rhs_i];
         for (unsigned b = 0; b < n_lhs; b++) {
-                c->cached_domains[b] = c->var[b]->domain;
-                unsigned isred =  !!HAS_RED(c->cached_domains[b]);
+                unsigned isred =  !!HAS_RED(c->domains[b]);
                 R |= isred << b;
-                unsigned isblue = !!HAS_BLUE(c->cached_domains[b]);
+                unsigned isblue = !!HAS_BLUE(c->domains[b]);
                 B |= isblue << b;
         }
 
@@ -184,80 +210,86 @@ static inline CSError ConstraintVisibility_filter(struct Constraint * c, bitset 
         }
 
         for (unsigned b = 0; b < n_lhs; b++) {
-                c->cached_domains[b] = (!!(B & 1<<b) << BLUEBIT) | (!!(R & 1<<b) << REDBIT);
-                // printf("%lu %u\n", c->cached_domains[b], (unsigned)((!(R & 1<<b) << REDBIT)));
-                modified |= (c->cached_domains[b] != c->var[b]->domain) << b;
+                bitset reduced_domain = (!!(B & 1<<b) << BLUEBIT) | (!!(R & 1<<b) << REDBIT);
+                if (c->domains[b] != reduced_domain) {
+                        struct Restriction * r = Restriction_create(c->vars[b], reduced_domain, c);
+                        LNode_prepend(ret, r, 0);
+                }
         }
-        c->cached_domains[rhs_i] = y;
-
-        modified |= (c->cached_domains[rhs_i] != c->var[rhs_i]->domain) << rhs_i;
-
-        if (modified_domains) {
-                *modified_domains = modified;
+        if (c->domains[rhs_i] != y) {
+                struct Restriction * r = Restriction_create(c->vars[rhs_i], y, c);
+                LNode_prepend(ret, r, 0);
         }
 
         return NO_FAILURE;
 }
 
-static inline CSError ConstraintVisibility_create(struct Constraint * c,
+static inline CSError ConstraintVisibility_init(struct Constraint * c,
                                                  struct Var ** lhsvars,
                                                  unsigned n_lhsvars,
                                                  struct Var *rhsvar)
 {
         c->filter = ConstraintVisibility_filter;
         c->n_vars = n_lhsvars + 1;
-        c->var = malloc(c->n_vars * sizeof(struct Var*));
-        if (!c->var) { goto bad_alloc1; }
-        c->cached_domains = malloc(c->n_vars * sizeof(bitset));
-        if (!c->cached_domains) { goto bad_alloc2; }
+        c->vars = malloc(c->n_vars * sizeof(struct Var*));
+        if (!c->vars) { goto bad_alloc1; }
+        c->domains = malloc(c->n_vars * sizeof(bitset));
+        if (!c->domains) { goto bad_alloc2; }
 
         unsigned i;
         for (i = 0; i < n_lhsvars; i++) {
-                c->var[i] = lhsvars[i];
-                c->cached_domains[i] = lhsvars[i]->domain;
+                c->vars[i] = lhsvars[i];
+                c->domains[i] = lhsvars[i]->domain;
         }
-        c->var[i] = rhsvar;
+        c->vars[i] = rhsvar;
 
         return NO_FAILURE;
 bad_alloc2:
-        free(c->var);
+        free(c->vars);
 bad_alloc1:
         return FAIL_ALLOC;
 }
 
 static inline CSError ConstraintVisibility_destroy(struct Constraint * c)
 {
-        if (!c->var || !c->cached_domains) { goto fail; }
-        free(c->var);
-        free(c->cached_domains);
+        if (!c->vars || !c->domains) {
+                goto fail;
+        }
+        free(c->vars);
+        free(c->domains);
         return NO_FAILURE;
 fail:
-        return FAIL_ALLOC;
+        return FAILURE;
 }
 
 ////////
 // Generic Constraint Functions
 ////////
-static inline unsigned Constraint_filter(struct Constraint * c, bitset * modified_domains)
+static inline CSError Constraint_filter(struct Constraint * c, struct LNode ** ret)
 {
-        return c->filter(c, modified_domains);
+        for (unsigned i = 0; i < c->n_vars; i++) {
+                c->domains[i] = c->vars[i]->domain;
+        }
+        *ret = NULL;
+        return c->filter(c, ret);
 }
 
 static inline CSError Constraint_destroy(struct Constraint * c)
 {
+        CSError fail = NO_FAILURE;
         if (c->filter == ConstraintSum_filter) {
-                ConstraintSum_destroy(c);
+                fail = ConstraintSum_destroy(c);
         } else if (c->filter == ConstraintVisibility_filter) {
-                ConstraintVisibility_destroy(c);
+                fail = ConstraintVisibility_destroy(c);
         }
-        return NO_FAILURE;
-
+        return fail;
 }
 static inline void Constraint_print(struct Constraint * c)
 {
         printf("id=%u: | N=%u:\n", c->id, c->n_vars);
         for (unsigned i = 0; i < c->n_vars; i++) {
-                printf("%u ", c->var[i]->id); bitset_print(c->var[i]->domain);
+                printf("%u ", c->vars[i]->id);
+                bitset_print(c->vars[i]->domain);
         }
         printf("\n");
 }

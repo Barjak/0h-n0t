@@ -209,7 +209,7 @@ static inline CSError QUEUESET_DELETE(struct QUEUESET * Q, struct QNODE * node)
 #define QUEUESET_POP CONCAT(QueueSet_pop_,QTYPENAME)
 
 static inline
-CSError QUEUESET_POP(struct QUEUESET * Q, QTYPE * data)
+CSError QUEUESET_POP(struct QUEUESET * Q, QTYPE * data) // This requires error codes because QTYPE may be a literal
 {
         struct QNODE * node = Q->end;
         if (!node) {

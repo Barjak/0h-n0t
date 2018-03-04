@@ -1,20 +1,5 @@
 #include "Problem.h"
-static struct Restriction * Restriction_create(struct Var * v, bitset domain, struct Constraint * c)
-{
-        unsigned N = c ? c->n_vars : 0;
-        struct Restriction * r = malloc(sizeof(struct Restriction) + N * sizeof(struct Restriction*));
-        if (!r) { goto bad_alloc1; }
-        *r = (struct Restriction){
-                .var                    = v,
-                .domain                 = domain,
-                .constraint             = c,
-                .var_restrict_prev      = NULL,
-                .implications           = NULL,
-                .n_necessary_conditions = N};
-        return r;
-bad_alloc1:
-        return NULL;
-}
+#include "QueueSet_void_ptr.h"
 
 struct Problem * Problem_create()
 {
@@ -32,73 +17,22 @@ struct Problem * Problem_create()
                 .var_registry_data = NULL,
                 .c_registry        = NULL,
                 .DAG_data          = NULL};
-        p->Q = QueueSet_create_arc();
+        p->Q = QueueSet_create_void_ptr();
         return p;
 bad_alloc1:
         return NULL;
 }
 
-// TODO: error codes
-// TODO: only filter if necessary
-CSError Problem_get_restriction(struct Problem * p,
-                                struct Constraint * c,
-                                struct Var * v,
-                                struct Restriction ** rp)
+CSError Problem_enqueue_related_constraints(struct Problem * p, struct Var * v)
 {
-        // Find v index in c->vars
-        unsigned v_i;
-        for (v_i = 0; v_i < c->n_vars; v_i++) {
-                if (c->var[v_i] == v) {
-                        break;
-                }
-        }
-
-        // Run the filter if some condition is met
-        // (such as a registry flag or simply always)
-        // bitset modified_domains = 0;
-        Constraint_filter(c, NULL);
-
-        // If a var domain is more restricted than the cached domain, schedule a filter
-        // If it's less restricted, allocate and return a DAG node (Restriction)
-        bitset dvar = v->domain;
-        bitset dcon = c->cached_domains[v_i];
-        bitset present_in_v_absent_in_c = ~(dcon | ~dvar);
-        bitset absent_in_v_present_in_c = ~(~dcon | dvar);
-        if (absent_in_v_present_in_c) {
-                // Constraint_filter(c, NULL);
-                // FIXME: push all domain changes into the queue
-        }
-        if (rp == NULL) { goto bad_arg; }
-        *rp = NULL;
-        if (present_in_v_absent_in_c) {
-                // printf("dvar = "); bitset_print(dvar);
-                // printf("dcon = "); bitset_print(dcon);
-                *rp = Restriction_create(v, dvar & dcon, c);
-                if (*rp == NULL) { goto bad_alloc1; }
-        }
-        return NO_FAILURE;
-
-bad_alloc1:
-        return FAIL_ALLOC;
-bad_arg:
-        return FAIL_PARAM;
-}
-
-CSError Problem_enqueue_related_arcs(struct Problem * p, struct Arc arc)
-{
-        // TODO: Check that the given arc even exists
-        struct VarRegister * vreg = P_var_register(p, arc.var);
+        struct VarRegister * vreg = P_var_register(p, v);
         for (struct Constraint ** cp = vreg->constraint;
              cp < vreg->constraint + vreg->n_active_constraints;
              cp++) {
-                if (P_cons_register(p, *cp)->active == 0) { continue; }
-               // if (*cp == arc.constraint) { continue; }
-                for (struct Var ** vp = (*cp)->var;
-                     vp < (*cp)->var + (*cp)->n_vars;
-                     vp++) {
-                        if (*vp == arc.var) { continue; }
-                        QueueSet_insert_arc(p->Q, (struct Arc){*vp, *cp});
+                if ( ! P_cons_is_active(p, *cp)) {
+                        continue;
                 }
+                QueueSet_insert_void_ptr(p->Q, *cp);
         }
         return NO_FAILURE;
 }
@@ -119,7 +53,7 @@ CSError Problem_add_DAG_node(struct Problem * p, struct Restriction * r)
                 // Put them in an array and assign to r->necessary_conditions
 
                 for (unsigned i = 0; i < r->n_necessary_conditions; i++) {
-                        struct Var * current = r->constraint->var[i];
+                        struct Var * current = r->constraint->vars[i];
                         struct Restriction * parent = P_var_register(p, current)->most_recent_restriction;
 
                         r->necessary_conditions[i] = parent;
@@ -170,16 +104,7 @@ static CSError Problem_remove_DAG_node(struct Problem * p, struct Restriction * 
         }
 
         if (enqueue_invalidated_arcs) {
-                for (unsigned i = 0; i < vreg->n_constraints; i++) {
-                        struct Constraint * c = vreg->constraint[i];
-                        if ( ! P_cons_is_active(p, c)) {
-                                continue;
-                        }
-                        for (unsigned j = 0; j < c->n_vars; j++) {
-                                assert(c->var[j]);
-                                QueueSet_insert_arc(p->Q, (struct Arc){c->var[j], c});
-                        }
-                }
+                Problem_enqueue_related_constraints(p, r->var);
         }
 
         free(r);
@@ -190,27 +115,30 @@ static CSError Problem_remove_DAG_node(struct Problem * p, struct Restriction * 
 CSError Problem_solve_queue(struct Problem * p)
 {
         int fail = NO_FAILURE;
-        struct QueueSet_arc * Q = p->Q;
+        struct QueueSet_void_ptr * Q = p->Q;
         while (Q->n_entries != 0) {
                 // Pop from Queue
-                struct Arc arc;
-                fail = QueueSet_pop_arc(Q, &arc);
+                void * ptr = NULL;
+                fail = QueueSet_pop_void_ptr(Q, &ptr);
+                struct Constraint * c = ptr;
                 NOFAIL(fail);
-                if (!P_cons_is_active(p, arc.constraint)) {
+                // printf("%lu yolo %lu\n", (unsigned long)p, (unsigned long)c->id);
+                if ( ! (p)->c_registry[(c)->id].active) {
                         continue;
                 }
-                struct Restriction * restriction;
-                fail = Problem_get_restriction(p, arc.constraint, arc.var, &restriction);
+                struct LNode * restrictions = NULL;
+                fail = Constraint_filter(c, &restrictions);
                 NOFAIL(fail);
-                if (restriction != NULL) {
+                while (restrictions) {
                         // If a domain reduction is found, call Problem_add_DAG_node()
-                        if (restriction->domain == 0) {
+                        struct Restriction * r = LNode_pop(&restrictions);
+                        if (r->domain == 0) {
                                 goto infeasible;
                         }
-                        fail = Problem_add_DAG_node(p, restriction);
+                        fail = Problem_add_DAG_node(p, r);
                         NOFAIL(fail);
                         // Push every arc that touches one of this var's constraints
-                        Problem_enqueue_related_arcs(p, arc);
+                        Problem_enqueue_related_constraints(p, r->var);
                 }
         }
         return NO_FAILURE;
@@ -220,16 +148,14 @@ infeasible:
 
 CSError Problem_solve(struct Problem * p)
 {
-        struct QueueSet_arc * Q = p->Q;
+        struct QueueSet_void_ptr * Q = p->Q;
         // Initialize Queue
         for (unsigned c_i = 0; c_i < p->n_constraints; c_i++) {
-                struct ConstraintRegister * c = &p->c_registry[c_i];
-                if (c->active == 0) {
+                struct ConstraintRegister * cr = &p->c_registry[c_i];
+                if (cr->active == 0) {
                         continue;
                 }
-                for (unsigned i = 0; i < c->constraint->n_vars; i++) {
-                        QueueSet_insert_arc(Q, (struct Arc){c->constraint->var[i], c->constraint});
-                }
+                QueueSet_insert_void_ptr(Q, cr->constraint);
         }
 
         return Problem_solve_queue(p);
@@ -249,7 +175,6 @@ CSError Problem_constraint_deactivate(struct Problem * p, struct Constraint * c)
                 Problem_remove_DAG_node(p, cr->instances->data, 1);
         }
 
-
         return NO_FAILURE;
 }
 CSError Problem_constraint_activate(struct Problem * p, struct Constraint * c)
@@ -258,8 +183,8 @@ CSError Problem_constraint_activate(struct Problem * p, struct Constraint * c)
         cr->active = 1;
 
         for (unsigned j = 0; j < c->n_vars; j++) {
-                assert(c->var[j]);
-                QueueSet_insert_arc(p->Q, (struct Arc){c->var[j], c});
+                assert(c->vars[j]);
+                QueueSet_insert_void_ptr(p->Q, c);
         }
 
         return NO_FAILURE;
@@ -274,13 +199,14 @@ CSError Problem_var_reset_domain(struct Problem * p, struct Var * v, bitset doma
                 vr->most_recent_restriction = r->var_restrict_prev;
                 Problem_remove_DAG_node(p, r, 1);
         }
-
+        assert(vr->most_recent_restriction == NULL);
         struct Restriction * r = Restriction_create(v, domain, NULL);
         if (r == NULL) {
                 goto bad_alloc1;
         }
         Problem_add_DAG_node(p, r);
 
+        Problem_enqueue_related_constraints(p, v);
         // Change the initial node's domain
         v->domain = domain;
         return NO_FAILURE;
@@ -343,7 +269,7 @@ CSError Problem_create_registry(struct Problem * p)
         unsigned total_array_size = 0;
         for (struct ConstraintRegister * cr = c_register; cr != c_register + p->n_constraints; cr++) {
                 assert(cr->constraint != NULL);
-                struct Var ** vars = cr->constraint->var;
+                struct Var ** vars = cr->constraint->vars;
                 for (unsigned v_i = 0; v_i < cr->constraint->n_vars; v_i++) {
                         unsigned v_id = vars[v_i]->id;
                         var_registry[v_id].n_constraints += 1;
@@ -362,7 +288,7 @@ CSError Problem_create_registry(struct Problem * p)
         }
         // Pass 3: Build all arrays
         for (struct ConstraintRegister * cr = c_register; cr != c_register + p->n_constraints; cr++) {
-                struct Var ** vars = cr->constraint->var;
+                struct Var ** vars = cr->constraint->vars;
                 for (unsigned v_i = 0; v_i < cr->constraint->n_vars; v_i++) {
                         struct VarRegister * v_reg = &var_registry[vars[v_i]->id];
                         v_reg->constraint[v_reg->n_active_constraints++] = cr->constraint;
@@ -433,7 +359,7 @@ void Problem_destroy(struct Problem * p)
                 free(p->var_registry);
                 free(p->var_registry_data);
         }
-        QueueSet_destroy_arc(p->Q);
+        QueueSet_destroy_void_ptr(p->Q);
 
         LNode_destroy_and_free_data(p->var_llist);
         LNode_destroy_and_free_data(p->constraint_llist);

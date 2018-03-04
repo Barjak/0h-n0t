@@ -16,17 +16,6 @@
 #define D_TRUE 1
 #define D_FALSE 0
 
-struct Restriction {
-        struct Var         * var;
-        bitset               domain;
-        struct Constraint  * constraint;
-
-        struct Restriction * var_restrict_prev; // List of definition Restrictions
-        struct LNode       * implications; // (struct Restriction*)implications->data
-        unsigned             n_necessary_conditions;
-        struct Restriction * necessary_conditions[];
-};
-
 // List of all related constraints
 // Inactive constraints are put at the end of the list
 struct VarRegister {
@@ -43,7 +32,7 @@ struct ConstraintRegister {
         struct Constraint * constraint;
         unsigned            active;
 
-        struct LNode *      instances; // (struct Restriction*)instances->data
+        struct LNode      * instances; // (struct Restriction*)instances->data
 };
 
 struct Problem {
@@ -61,7 +50,7 @@ struct Problem {
 
         void                      * DAG_data;
 
-        struct QueueSet_arc       * Q;
+        struct QueueSet_void_ptr  * Q;
 };
 
 struct Problem * Problem_create();
@@ -72,7 +61,7 @@ CSError Problem_get_restriction(struct Problem * p,
 struct Var * Problem_create_vars(struct Problem * p, unsigned n, unsigned domain_width);
 struct Constraint * Problem_create_empty_constraints(struct Problem * p, unsigned n);
 void Problem_destroy(struct Problem * p);
-CSError Problem_enqueue_related_arcs(struct Problem * p, struct Arc arc);
+CSError Problem_enqueue_related_constraints(struct Problem * p, struct Var * v);
 CSError Problem_create_registry(struct Problem * p);
 CSError Problem_solve_queue(struct Problem * p);
 CSError Problem_solve(struct Problem * p);
