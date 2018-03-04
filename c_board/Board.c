@@ -618,7 +618,7 @@ struct Hint Board_get_hint(struct Board * board)
                                         ret.id = (int)v_i;
                                         ret.type = board->max_grid->tiles[ret.id].type;
                                         free(r);
-                                        LNode_destroy_and_free_data(restrictions);
+                                        LNode_destroy_and_free_data(&restrictions);
                                         break;
                                 }
                                 // assert(! HashSet_contains_void_ptr(pdata->vars_set, arc.var));

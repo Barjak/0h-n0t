@@ -41,33 +41,33 @@ no_root:
         return NULL;
 }
 static inline
-void LNode_destroy(struct LNode * root)
+void LNode_destroy(struct LNode ** root)
 {
-        while (root) {
-                struct LNode * next = root->next;
-                free(root);
-                root = next;
+        while (*root) {
+                struct LNode * next = (*root)->next;
+                free(*root);
+                *root = next;
         }
 }
 static inline
-void LNode_destroy_and_free_data(struct LNode * root)
+void LNode_destroy_and_free_data(struct LNode ** root)
 {
-        while (root) {
-                struct LNode * next = root->next;
-                if (root->data) {
-                        free(root->data);
+        while (*root) {
+                struct LNode * next = (*root)->next;
+                if ((*root)->data) {
+                        free((*root)->data);
                 }
-                free(root);
-                root = next;
+                free(*root);
+                *root = next;
         }
 }
 static inline
-unsigned LNode_count(struct LNode * root)
+unsigned LNode_count(struct LNode ** root)
 {
-        if (root == NULL) {
+        if ((*root) == NULL) {
                 return 0;
         } else {
-                return 1 + LNode_count(root->next);
+                return 1 + LNode_count(&(*root)->next);
         }
 }
 static inline

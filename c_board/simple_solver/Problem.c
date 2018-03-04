@@ -361,6 +361,6 @@ void Problem_destroy(struct Problem * p)
         }
         QueueSet_destroy_void_ptr(p->Q);
 
-        LNode_destroy_and_free_data(p->var_llist);
-        LNode_destroy_and_free_data(p->constraint_llist);
+        LNode_destroy_and_free_data(&p->var_llist);
+        LNode_destroy_and_free_data(&p->constraint_llist);
 }
