@@ -36,21 +36,22 @@ struct Board {
 int tile2int(struct Tile * t);
 void int2tile(Type i, struct Tile * t);
 
-struct Board * Board_create(unsigned width, unsigned height);
-unsigned Board_initialize(struct Board * board, unsigned max_tile);
-void Board_print(struct Board * board);
-void Board_destroy(struct Board * board);
-int Board_click(struct Board * board, int x, int y, int button);
-double Board_reduce(struct Board * board, unsigned batch_size);
+struct Board * Board_create(      unsigned       width, unsigned height);
+unsigned       Board_maxify(      struct Board * board, unsigned max_tile);
+void           Board_init_problem(struct Board * board, int      difficulty);
+double         Board_reduce(      struct Board * board, unsigned batch_size);
+void           Board_destroy(     struct Board * board);
 
-int Board_get_x(struct Board * board, int index);
-int Board_get_y(struct Board * board, int index);
-struct Tile * Board_get_tile(struct Board * board, int index);
-void Board_init_solver(struct Board * board);
-int Board_get_mistake(struct Board * board);
-struct Hint Board_get_hint(struct Board * board);
-int Board_is_solved(struct Board * board);
-void Board_pop_change(struct Board * board);
+int            Board_get_x(       struct Board * board, int index);
+int            Board_get_y(       struct Board * board, int index);
+struct Tile *  Board_get_tile(    struct Board * board, int index);
+int            Board_get_mistake( struct Board * board);
+int            Board_click(       struct Board * board, int x, int y, int button);
+struct Hint    Board_get_hint(    struct Board * board);
+int            Board_is_solved(   struct Board * board);
+void           Board_pop_change(  struct Board * board);
 
-unsigned Board_write(struct Board * board, unsigned n_seconds);
-struct Board * Board_read(unsigned * n_seconds);
+unsigned       Board_write(       struct Board * board, unsigned n_seconds);
+struct Board * Board_read(        unsigned     * n_seconds);
+
+void           Board_print(       struct Board * board);

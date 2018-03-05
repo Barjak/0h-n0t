@@ -119,6 +119,7 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                         if (0 == n_empty[d]) {
                                                 FED_i[d] = i;
                                                 add_one_yield[d]++;
+
                                                 how_many_directions++;
                                                 only_direction = d;
                                         }
@@ -170,6 +171,7 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                 /* 3 */
                                 if (add_one_yield[d] + n_blue > c->tile_data.target_value) {
                                         int i = FED_i[d];
+                                        assert(i != -1);
                                         c->domains[i] = RED;
                                         if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, RED, restrictions_return)) {
                                                 goto bad_alloc1;
@@ -179,15 +181,15 @@ static inline CSError ConstraintTile_filter(struct Constraint * c, struct LNode 
                                 }
                                 /* 4 */
                                 // FIXME: Why does this make worse boards?
-                                // else if (FED_i[d] != -1 &&
-                                //          add_one_yield[d] + n_blue + max_possible_other_directions <= c->tile_data.target_value) {
-                                //             int i = FED_i[d];
-                                //             c->domains[i] = BLUE;
-                                //             if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
-                                //                     goto bad_alloc1;
-                                //             }
-                                //             modified = 1;
-                                //             break;
+                                // else if (add_one_yield[d] &&
+                                         // add_one_yield[d] + n_blue_dir[d] + max_possible_other_directions <= c->tile_data.target_value) {
+                                            // int i = FED_i[d];
+                                            // c->domains[i] = BLUE;
+                                            // if (FAIL_ALLOC == C_push_restriction_on_nth_var(c, i, BLUE, restrictions_return)) {
+                                                    // goto bad_alloc1;
+                                            // }
+                                            // modified = 1;
+                                            // break;
                                 // }
                         }
                 }

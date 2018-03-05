@@ -129,7 +129,10 @@ function UI:new_game(width, height)
    self.board = nil
    self.board_renderer = nil
 
-   chout:push({ width = width, height = height or width, maxNumber = math.min(width, 9)} )
+   chout:push({ width = width,
+                height = height or width,
+                max_number = math.min(width, 9),
+                difficulty = HARD} )
    self.thread:start()
 
    self.loading_callback = function(dt, this_fun)

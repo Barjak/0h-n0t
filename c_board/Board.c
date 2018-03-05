@@ -24,7 +24,9 @@ Vector Directions[4] = {{.x = 0,  .y = -1},
                         {.x = -1, .y = 0},
                         {.x = 1,  .y = 0}};
 
-typedef enum { ACTIVE = 0, INACTIVE = 1, TABOO = 2} State;
+typedef enum {ACTIVE = 0, INACTIVE = 1, TABOO = 2} State;
+
+typedef enum {EASY = 0, HARD = 1} Difficulty;
 
 struct TileData {
         State               state;
@@ -309,7 +311,7 @@ bad_alloc1:
 // ProblemData
 //////////////
 
-struct ProblemData * PData_create(struct Grid * grid, int simple)
+struct ProblemData * PData_create(struct Grid * grid, int difficulty)
 {
 // Initialize things
         unsigned len = grid->length;
@@ -366,7 +368,8 @@ struct ProblemData * PData_create(struct Grid * grid, int simple)
                 goto bad_alloc3;
         }
 // Define the problem
-        if (!simple) {
+        if (HARD == difficulty) {
+                printf("HARD\n");
                 for (unsigned i = 0; i < len; i++) {
                         if (grid->tiles[i].type != NUMBER) {
                                 continue;
@@ -405,6 +408,7 @@ struct ProblemData * PData_create(struct Grid * grid, int simple)
                         tile_data[i].constraints[tile_data[i].n_constraints++] = sum;
                 }
         } else {
+                printf("easy\n");
                 for (unsigned i = 0; i < len; i++) {
                         if (grid->tiles[i].type != NUMBER) {
                                 continue;
@@ -453,6 +457,13 @@ struct ProblemData * Board_pdata(struct Board * board)
 {
         return board->private;
 }
+
+//////////
+// Board
+//////////
+// Lua functions:
+//   -> serialize()
+//   -> deserialize()
 double Board_reduce(struct Board * board, unsigned batch_size)
 {
         struct ProblemData * pdata = board->private;
@@ -491,12 +502,7 @@ double Board_reduce(struct Board * board, unsigned batch_size)
         Problem_solve(p);
         return (double)pdata->i / pdata->length;
 }
-//////////
-// Board
-//////////
-// Lua functions:
-//   -> serialize()
-//   -> deserialize()
+
 CSError Board_allocate_grids(struct Board * board, unsigned width, unsigned height)
 {
         unsigned length = width * height;
@@ -562,13 +568,16 @@ void Board_destroy(struct Board * board)
         }
 }
 
-void Board_init_solver(struct Board * board)
+void Board_init_problem(struct Board * board, int difficulty)
 {
-        assert(board->min_grid);
-        assert(board->max_grid);
-        assert(board->min_tile_mask);
-        board->private = PData_create(board->min_grid, 1);
-        assert(board->private);
+        board->private = PData_create(board->min_grid, difficulty);
+}
+unsigned Board_maxify(struct Board * board, unsigned max_tile)
+{
+        maxify(board->max_grid, max_tile);
+        Grid_copy_to(board->max_grid, board->min_grid);
+
+        return NO_FAILURE;
 }
 
 struct Hint Board_get_hint(struct Board * board)
@@ -635,16 +644,7 @@ struct Hint Board_get_hint(struct Board * board)
         return ret;
 }
 
-unsigned Board_initialize(struct Board * board, unsigned max_tile)
-{
-        maxify(board->max_grid, max_tile);
-        Grid_copy_to(board->max_grid, board->min_grid);
 
-        board->private = PData_create(board->min_grid, 1);
-        assert(board->private);
-
-        return NO_FAILURE;
-}
 
 int Board_get_x(struct Board * board, int index)
 {
@@ -867,7 +867,7 @@ struct Board * Board_read(unsigned * n_seconds)
                 board->min_tile_mask[i]         = tiles[i].mask;
         }
 
-        Board_init_solver(board);
+        Board_init_problem(board, HARD);
 
         for (unsigned i = 0; i < board->length; i++) {
                 if ((tiles[i].min_type == FILLED && tiles[i].max_type == WALL) ||
@@ -875,7 +875,6 @@ struct Board * Board_read(unsigned * n_seconds)
                         LNode_prepend(&Board_pdata(board)->mistakes, Board_get_tile(board, i), i);
                 }
         }
-
 
         free(tiles);
         fclose(fp);
@@ -893,12 +892,12 @@ cannot_open:
         return NULL;
 }
 
-
 int main()
 {
-        int size = 40;
+        int size = 64;
         struct Board * board = Board_create(size, size);
-        Board_initialize(board, 9);
+        Board_maxify(board, 9);
+        Board_init_problem(board, EASY);
         Board_reduce(board, size * size);
         Board_print(board);
 

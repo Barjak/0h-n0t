@@ -4,13 +4,14 @@ function main()
    local input = love.thread.getChannel("to_thread")
    local job_data = input:pop()
 
-   local width, height, maxNumber = job_data.width, job_data.height, job_data.maxNumber
+   local width, height, maxNumber, difficulty = job_data.width, job_data.height, job_data.max_number, job_data.difficulty
    if nil == height or 0 == height then
       height = width
    end
 
    local b = Board(width, height)
-   b:initialize(maxNumber)
+   b:maxify(maxNumber)
+   b:init_problem(difficulty)
 
    local out = love.thread.getChannel("from_thread")
    local batch_size = math.sqrt(width*height) * 2

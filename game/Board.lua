@@ -14,6 +14,9 @@ NUMBER = c_routines.NUMBER
 WALL = c_routines.WALL
 FILLED = c_routines.FILLED
 
+HARD = 1
+EASY = 0
+
 function tile2int(tile)
    return c_routines.tile2int(tile)
 end
@@ -56,7 +59,7 @@ function Board.deserialize(table)
       end
       int2tile(max_grid[i], ret.max_grid.tiles[i])
    end
-   c_routines.Board_init_solver(ret)
+   c_routines.Board_init_problem(ret, HARD)
    assert(ret.height ~= 0)
    return ret
 end
@@ -68,8 +71,11 @@ end
 function Board.print(self)
    return c_routines.Board_print(self)
 end
-function Board.initialize(self, max_tile)
-   return c_routines.Board_initialize(self, max_tile)
+function Board.maxify(self, max_tile)
+   return c_routines.Board_maxify(self, max_tile)
+end
+function Board.init_problem(self, difficulty)
+   return c_routines.Board_init_problem(self, difficulty)
 end
 function Board.destroy(self)
    c_routines.Board_destroy(self)
