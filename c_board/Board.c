@@ -369,7 +369,6 @@ struct ProblemData * PData_create(struct Grid * grid, int difficulty)
         }
 // Define the problem
         if (HARD == difficulty) {
-                printf("HARD\n");
                 for (unsigned i = 0; i < len; i++) {
                         if (grid->tiles[i].type != NUMBER) {
                                 continue;
@@ -408,7 +407,6 @@ struct ProblemData * PData_create(struct Grid * grid, int difficulty)
                         tile_data[i].constraints[tile_data[i].n_constraints++] = sum;
                 }
         } else {
-                printf("easy\n");
                 for (unsigned i = 0; i < len; i++) {
                         if (grid->tiles[i].type != NUMBER) {
                                 continue;
@@ -574,10 +572,16 @@ void Board_init_problem(struct Board * board, int difficulty)
 }
 unsigned Board_maxify(struct Board * board, unsigned max_tile)
 {
+        if (!board) {
+                goto no_board;
+        }
+
         maxify(board->max_grid, max_tile);
         Grid_copy_to(board->max_grid, board->min_grid);
 
         return NO_FAILURE;
+no_board:
+        return FAIL_PARAM;
 }
 
 struct Hint Board_get_hint(struct Board * board)
@@ -892,15 +896,59 @@ cannot_open:
         return NULL;
 }
 
-int main()
-{
-        int size = 64;
-        struct Board * board = Board_create(size, size);
-        Board_maxify(board, 9);
-        Board_init_problem(board, EASY);
-        Board_reduce(board, size * size);
-        Board_print(board);
+// Emscripten helper functions
 
-        Board_print(board);
-        return 0;
+// TODO: validate/rebuild numbering
+struct Board * Board_create_from_full_array(unsigned width,
+                                            unsigned height,
+                                            uint8_t * exportvalues) // Using Martin's encoding
+{
+        unsigned length = width * height;
+        struct Board * board = Board_create(width, height);
+        if (!board) {
+                goto bad_alloc1;
+        }
+        for (unsigned i = 0; i < length; i++) {
+                switch (exportvalues[i]) {
+                case 0:
+                        goto array_contains_empty;
+                case 1:
+                        int2tile(WALL, &board->max_grid->tiles[i]);
+                        break;
+                case 2:
+                        goto array_contains_filled;
+                default:
+                        int2tile(exportvalues[i] - 2, &board->max_grid->tiles[i]);
+                        break;
+                }
+        }
+        // Grid_copy_to(board->max_grid, board->min_grid);
+        return board;
+
+array_contains_filled:
+array_contains_empty:
+        Board_destroy(board);
+bad_alloc1:
+        return NULL;
+}
+int tile2exportvalue(struct Tile * t)
+{
+        switch (t->type) {
+        case EMPTY:
+                return 0;
+        case WALL:
+                return 1;
+        case FILLED:
+                return 2;
+        default:
+                return t->value + 2;
+        }
+}
+int Board_get_full_tile(struct Board * board, unsigned tile_i)
+{
+        return tile2exportvalue(&board->max_grid->tiles[tile_i]);
+}
+int Board_get_reduced_tile(struct Board * board, unsigned tile_i)
+{
+        return tile2exportvalue(&board->min_grid->tiles[tile_i]);
 }
