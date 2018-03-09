@@ -221,7 +221,7 @@ static CSError Problem_DAG_init(struct Problem * p)
         p->n_DAG_nodes = p->n_vars;
         return NO_FAILURE;
 bad_alloc1:
-        for (i = i; i >= 0; i--) {
+        for (i = i-1; i >= 0; i--) {
                 free(p->var_registry[i].most_recent_restriction);
                 p->var_registry[i].most_recent_restriction = NULL;
         }
