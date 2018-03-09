@@ -183,12 +183,7 @@ CSError Problem_constraint_activate(struct Problem * p, struct Constraint * c)
 {
         struct ConstraintRegister * cr = P_cons_register(p, c);
         cr->active = 1;
-
-        for (unsigned j = 0; j < c->n_vars; j++) {
-                assert(c->vars[j]);
-                QueueSet_insert_void_ptr(p->Q, c);
-        }
-
+        QueueSet_insert_void_ptr(p->Q, c);
         return NO_FAILURE;
 }
 CSError Problem_var_reset_domain(struct Problem * p, struct Var * v, bitset domain)
