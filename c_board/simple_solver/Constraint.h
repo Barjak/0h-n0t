@@ -23,7 +23,7 @@ struct ConstraintTile {
 };
 
 /**
- * struct Constraint is a tagged union whose tag is @<.filter@>
+ * struct Constraint is a tagged union whose tag is Constraint::filter
  */
 struct Constraint {
         unsigned      id;      /**< Index used by the solver. */
@@ -37,7 +37,7 @@ struct Constraint {
         /**< A domain propagation algorithm that also acts as a type tag.
              Invoking a filter passes back a linked list of domain restrictions.
              The solver applies the domain restrictions when it feels like it.
-             Filters invoke @<C_push_restriction_on_nth_var()@> when they find a domain reduction. */
+             Filters invoke C_push_restriction_on_nth_var() when they find a domain reduction. */
         union {
                 struct ConstraintVisibility visibility_data;
                 struct ConstraintSum        sum_data;
@@ -47,9 +47,9 @@ struct Constraint {
 };
 
 struct Restriction {
-        struct Var         * var;
-        bitset               domain;
-        struct Constraint  * constraint;
+        struct Var         * var;                    /**< Variable to be restricted. */
+        bitset               domain;                 /**< The variable's new domain. */
+        struct Constraint  * constraint;             /**< The constraint which generated the restriction. If NULL, then the domain was restricted by the user. */
 
         struct Restriction * var_restrict_prev;      /**< The variable's previous restriction. */
         struct LNode       * implications;           /**< Linked list of child restrictions. */
